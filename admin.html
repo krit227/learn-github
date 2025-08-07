@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="p-6 bg-gray-100">
+<h1 class="text-xl font-bold mb-4">🏀 Admin Queue Manager</h1>
+
+<div class="mb-4">
+  <input id="new-team-name" placeholder="ชื่อทีมใหม่" class="border p-1" required />
+  <button onclick="addTeam()" class="bg-blue-600 text-white px-3 py-1 rounded">เพิ่มทีม</button>
+</div>
+
+<h2 class="font-semibold mb-2">📋 รายชื่อทีม</h2>
+<div id="teams-table"></div>
+
+<h2 class="font-semibold mb-2">⚔️ จัดแมตช์</h2>
+<div class="mb-6">
+  <button id="run-match-btn" onclick="runMatch()" class="bg-purple-600 text-white px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed">
+  จับคู่แมตช์ใหม่
+  </button>
+  <button onclick="clearTeams()" class="bg-red-600 text-white px-4 py-1 rounded ml-2">🗑️ เคลียร์ทั้งหมด</button>
+</div>
+
+
+<h2 class="font-semibold mb-2 mt-6">📜 แมตช์ที่เล่น</h2>
+<div id="matches-table"></div>
+
+<h2 class="font-semibold mt-6 mb-2">🏆 สถิติการชนะรวม</h2>
+<div id="win-stats-table"></div>
+
+<script>
+const editedNames = {}; 
+async function post(data) {
+  const res = await fetch('admin.php', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: new URLSearchParams(data)
+  });
+  return res.json();
+}
+
+async function deleteMatch(matchId) {
+  const confirmDelete = confirm("คุณแน่ใจหรือไม่ว่าต้องการลบแมตช์นี้?");
+  if (!confirmDelete) return;
+
+  await post({ delete_match: 1, match_id: matchId });
+  await loadAdminData();
+}
+
+async function addTeam() {
+  const name = document.getElementById('new-team-name').value.trim();
+  if (!name) return;
+  await post({ add_team: 1, team_name: name });
+  document.getElementById('new-team-name').value = '';
+  await loadAdminData();
+}
+
+async function deleteTeam(id) {
+  await post({ delete_team: 1, team_id: id });
+  await loadAdminData();
+}
+
+async function updateTeam(id) {
+  const input = document.getElementById(`new-name-${id}`);
+  const newName = input.value.trim();
+  if (!newName) return;
+  await post({ update_team: 1, team_id: id, new_name: newName });
+  await loadAdminData();
+}
+
+async function runMatch() {
+  await post({ run_match: 1 });
+  await loadAdminData();
+}
+
+async function recordResult(matchId) {
+  const select = document.getElementById(`winner-${matchId}`);
+  const winnerId = select.value;
+  if (!winnerId) return;
+  await post({ record_result: 1, match_id: matchId, winner_id: winnerId });
+  await loadAdminData();
+}
+
+async function clearTeams() {
+  const confirmClear = confirm("คุณแน่ใจหรือไม่ว่าต้องการล้างตารางทีมทั้งหมด?");
+  if (!confirmClear) return;
+
+  await post({ clear_teams: 1 });
+  await loadAdminData(); // โหลดข้อมูลใหม่หลังจากล้าง
+}
+
+async function loadAdminData() {
+  // เก็บค่าที่เลือกใน select (เดิม)
+  const selectedWinners = {};
+  document.querySelectorAll('select[id^="winner-"]').forEach(select => {
+    selectedWinners[select.id] = select.value;
+  });
+
+  // เก็บค่าที่ user พิมพ์ไว้ใน input "ชื่อใหม่"
+  document.querySelectorAll('input[id^="new-name-"]').forEach(input => {
+    editedNames[input.id] = input.value;
+  });
+
+  const res = await fetch('admin.php');
+  const data = await res.json();
+  const teams = data.teams;
+  const matches = data.matches;
+
+  const getName = id => {
+    const t = teams.find(t => t.id == id);
+    return t ? t.team_name : 'ไม่พบชื่อ';
+  };
+
+  // โหลดสถิติชนะ
+  const statsRes = await fetch('admin.php?stats=1');
+  const stats = await statsRes.json();
+
+  const statRows = stats.map(s => {
+    const teamName = getName(s.team_id);
+    return `<tr class="text-center"><td>${teamName}</td><td>${s.total_wins}</td></tr>`;
+  }).join("");
+
+  document.getElementById("win-stats-table").innerHTML = `
+    <table class="border w-full">
+      <tr class="bg-gray-200 text-center">
+        <th>ทีม</th><th>ชนะสะสม</th>
+      </tr>${statRows}
+    </table>
+  `;
+
+  // สร้างตารางทีม โดยเติม value จาก editedNames
+  const teamRows = teams.map(t => `
+    <tr class="text-center">
+        <td>${t.team_name}</td>
+        <td>${t.wins}</td>
+        <td>${t.losses}</td>
+        <td>${t.is_champion ? '✅' : ''}</td>
+        <td>${t.rest_turn}</td>
+        <td>${t.status}</td>
+        <td>
+        <input 
+            id="new-name-${t.id}" 
+            placeholder="ชื่อใหม่" 
+            class="border p-1 text-sm" 
+            value="${editedNames[`new-name-${t.id}`] || ''}"
+            oninput="editedNames[this.id] = this.value"
+        />
+        <button onclick="updateTeam(${t.id})" class="text-blue-500 text-sm">✏️</button>
+        <button 
+            onclick="deleteTeam(${t.id})" 
+            class="text-red-500 text-sm ml-2" 
+            ${t.status === 'Waiting' ? `<button onclick="deleteTeam(${t.id})" class="text-red-500 text-sm ml-2">❌</button>` : ''}  
+        </button>
+        </td>
+    </tr>
+    `).join("");
+
+
+  document.getElementById("teams-table").innerHTML = `
+    <table class="border w-full mb-6">
+      <tr class="bg-gray-200 text-center">
+        <th>ชื่อทีม</th><th>W</th><th>L</th><th>แชมป์</th><th>พัก</th><th>สถานะ</th><th>จัดการ</th>
+      </tr>${teamRows}
+    </table>
+  `;
+
+  // ตารางแมตช์
+  const matchRows = matches.map(m => {
+    const winName = m.winner_id ? getName(m.winner_id) : '-';
+    const loseName = m.loser_id ? getName(m.loser_id) : '-';
+
+    const selectId = `winner-${m.match_id}`;
+    const selectedValue = selectedWinners[selectId] || "";
+    const deleteBtn = m.status === 'Completed'
+    ? '✔️' // ไม่แสดงปุ่มเลย
+    : `<button onclick="deleteMatch(${m.match_id})" class="text-red-500 text-sm">❌</button>`;
+
+
+    const form = m.status === 'Pending' ? `
+      <select id="${selectId}" class="border p-1 text-sm w-full mb-1" required>
+        <option value="${m.team1_id}" ${selectedValue == m.team1_id ? "selected" : ""}>${getName(m.team1_id)}</option>
+        <option value="${m.team2_id}" ${selectedValue == m.team2_id ? "selected" : ""}>${getName(m.team2_id)}</option>
+      </select>
+      <button onclick="recordResult(${m.match_id})" class="text-green-600 text-sm">💾บันทึก💾</button>
+    ` : '✔️';
+
+    return `
+    <tr class="text-center">
+        <td>${getName(m.team1_id)}</td>
+        <td>${getName(m.team2_id)}</td>
+        <td>${winName}</td>
+        <td>${loseName}</td>
+        <td>${m.status}</td>
+        <td>${form}</td>
+        <td>${deleteBtn}</td>
+    </tr>
+    `;
+  }).join("");
+
+  document.getElementById("matches-table").innerHTML = `
+    <table class="border w-full">
+      <tr class="bg-gray-200 text-center">
+        <th>ทีม A</th><th>ทีม B</th><th>ชนะ</th><th>แพ้</th><th>สถานะ</th><th>บันทึกผล</th><th>จัดการ</th>
+      </tr>${matchRows}
+    </table>
+  `;
+  // ปรับปุ่มจับคู่แมตช์
+  const hasPending = matches.some(m => m.status === 'Pending');
+  const runMatchBtn = document.getElementById("run-match-btn");
+
+  if (hasPending) {
+    runMatchBtn.disabled = true;
+    runMatchBtn.title = "ยังมีแมตช์ที่ยังไม่บันทึกผล";
+  } else {
+    runMatchBtn.disabled = false;
+    runMatchBtn.title = "";
+  }
+}
+
+
+loadAdminData();
+// โหลดใหม่ทุก 5 วินาที (5000 มิลลิวินาที)
+setInterval(loadAdminData, 5000);
+</script>
+</body>
+</html>
