@@ -39,8 +39,16 @@ async function post(data) {
     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
     body: new URLSearchParams(data)
   });
-  return res.json();
+  const txt = await res.text();
+  try {
+    return JSON.parse(txt);
+  } catch(e) {
+    console.error('Server did not return JSON:', txt);
+    alert('เซิร์ฟเวอร์ส่งผลลัพธ์ไม่ใช่ JSON\nดู Console เพื่อรายละเอียด');
+    throw e;
+  }
 }
+
 
 async function deleteMatch(matchId) {
   const confirmDelete = confirm("คุณแน่ใจหรือไม่ว่าต้องการลบแมตช์นี้?");
@@ -87,10 +95,11 @@ async function recordResult(matchId) {
 async function clearTeams() {
   const confirmClear = confirm("คุณแน่ใจหรือไม่ว่าต้องการล้างตารางทีมทั้งหมด?");
   if (!confirmClear) return;
-
-  await post({ clear_teams: 1 });
-  await loadAdminData(); // โหลดข้อมูลใหม่หลังจากล้าง
+  const r = await post({ clear_teams: 1, clear_all: 1 });
+  if (!r?.ok) alert('เคลียร์ไม่สำเร็จ: ' + (r?.error || 'unknown'));
+  await loadAdminData();
 }
+
 
 async function loadAdminData() {
   // เก็บค่าที่เลือกใน select (เดิม)
@@ -140,23 +149,32 @@ async function loadAdminData() {
         <td>${t.is_champion ? '✅' : ''}</td>
         <td>${t.rest_turn}</td>
         <td>${t.status}</td>
-        <td>
-        <input 
-            id="new-name-${t.id}" 
-            placeholder="ชื่อใหม่" 
-            class="border p-1 text-sm" 
-            value="${editedNames[`new-name-${t.id}`] || ''}"
-            oninput="editedNames[this.id] = this.value"
-        />
-        <button onclick="updateTeam(${t.id})" class="text-blue-500 text-sm">✏️</button>
-        <button 
-            onclick="deleteTeam(${t.id})" 
-            class="text-red-500 text-sm ml-2" 
-            ${t.status === 'Waiting' ? `<button onclick="deleteTeam(${t.id})" class="text-red-500 text-sm ml-2">❌</button>` : ''}  
-        </button>
+        <td class="p-2">
+          <div class="flex flex-col md:flex-row items-center justify-center gap-2">
+            <input 
+              id="new-name-${t.id}" 
+              placeholder="ชื่อใหม่" 
+              class="border p-2 rounded w-full md:w-32 text-center"
+              value="${editedNames[`new-name-${t.id}`] || ''}"
+              oninput="editedNames[this.id] = this.value"
+            />
+            <button 
+              onclick="updateTeam(${t.id})" 
+              class="bg-blue-600 text-white px-3 py-1 rounded text-sm font-medium">
+              ✏️ แก้ไข
+            </button>
+            ${
+              t.status === 'Waiting' 
+                ? `<button onclick="deleteTeam(${t.id})" class="bg-red-600 text-white px-3 py-1 rounded text-sm font-medium">
+                    🗑️ ลบ
+                  </button>` 
+                : ''
+            }
+          </div>
         </td>
     </tr>
-    `).join("");
+  `).join("");
+
 
 
   document.getElementById("teams-table").innerHTML = `
@@ -175,17 +193,28 @@ async function loadAdminData() {
     const selectId = `winner-${m.match_id}`;
     const selectedValue = selectedWinners[selectId] || "";
     const deleteBtn = m.status === 'Completed'
-    ? '✔️' // ไม่แสดงปุ่มเลย
-    : `<button onclick="deleteMatch(${m.match_id})" class="text-red-500 text-sm">❌</button>`;
+      ? ''
+      : `<button 
+            onclick="deleteMatch(${m.match_id})" 
+            class="bg-red-600 text-white px-3 py-1 rounded text-sm font-medium">
+            🗑️ ลบ
+        </button>`;
 
 
     const form = m.status === 'Pending' ? `
-      <select id="${selectId}" class="border p-1 text-sm w-full mb-1" required>
-        <option value="${m.team1_id}" ${selectedValue == m.team1_id ? "selected" : ""}>${getName(m.team1_id)}</option>
-        <option value="${m.team2_id}" ${selectedValue == m.team2_id ? "selected" : ""}>${getName(m.team2_id)}</option>
-      </select>
-      <button onclick="recordResult(${m.match_id})" class="text-green-600 text-sm">💾บันทึก💾</button>
+      <div class="flex flex-col md:flex-row items-center justify-center gap-2">
+        <select id="${selectId}" class="border p-2 rounded text-sm w-full md:w-40 text-center" required>
+          <option value="${m.team1_id}" ${selectedValue == m.team1_id ? "selected" : ""}>${getName(m.team1_id)}</option>
+          <option value="${m.team2_id}" ${selectedValue == m.team2_id ? "selected" : ""}>${getName(m.team2_id)}</option>
+        </select>
+        <button 
+          onclick="recordResult(${m.match_id})" 
+          class="bg-blue-600 text-white px-3 py-1 rounded text-sm font-medium">
+          💾 บันทึก
+        </button>
+      </div>
     ` : '✔️';
+
 
     return `
     <tr class="text-center">
